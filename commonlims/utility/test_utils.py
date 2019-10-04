@@ -3,7 +3,8 @@ from sentry.models.organization import Organization
 from clims.models.plugin_registration import PluginRegistration
 from clims.models.extensible import ExtensiblePropertyType
 from uuid import uuid4
-from clims.services.substance import substances
+# from clims.services.substance import substances
+from clims.services.extensible import extensibles
 
 
 def create_organization():
@@ -18,30 +19,14 @@ def create_plugin(org=None):
     return plugin
 
 
-def create_substance_type(name=None, org=None, plugin=None, properties=None):
-    name = name or 'GemstoneSample'
+def create_gemstone_substance_type(org=None, plugin=None, properties=None):
     properties = properties or [
         dict(name='color', raw_type=ExtensiblePropertyType.STRING, display_name='Col.'),
         dict(name='preciousness', raw_type=ExtensiblePropertyType.STRING, display_name='Prec.'),
         dict(name='payload', raw_type=ExtensiblePropertyType.JSON, display_name='Payload'),
     ]
     plugin = plugin or create_plugin()
-
-    substance_type = substances.register_type('GemstoneSample', 'substances', plugin, properties=properties)
+    substance_type = extensibles._register_model('GemstoneSample', org, plugin, property_types=properties)
+    # substance_type = extensibles.register('GemstoneSample', org, plugin, properties=properties)
 
     return substance_type
-
-
-def create_substance(name=None, properties=None, substance_type=None, org=None):
-    org = org or create_organization()
-    substance_type = substance_type or create_substance_type(org=org)
-    if not name:
-        name = "sample-{}".format(uuid4())
-
-    substance = substances.create(
-        name=name,
-        extensible_type=substance_type,
-        organization=org,
-        properties=properties
-    )
-    return substance
