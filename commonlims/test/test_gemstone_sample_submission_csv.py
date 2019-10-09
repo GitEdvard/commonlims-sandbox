@@ -1,26 +1,25 @@
 from __future__ import absolute_import
 import os
-import tests
-import StringIO
 from six import BytesIO
 from django.db import IntegrityError
 from sentry.testutils import TestCase
 from sentry.models.file import File
-from clims.services.substance import substances
 from clims.services.file_service.csv import Csv
 from clims.models.file import OrganizationFile
 from clims.models.substance import Substance
-from sentry_plugins.snpseq.plugin.handlers import GemstoneSubstancesSubmission
-from commonlims.utility.test_utils import create_organization
-from commonlims.utility.test_utils import create_gemstone_substance_type
+from clims.handlers import HandlerContext
+from commonlims.utility.test_utils import create_plugin
+from commonlims.utility.gemstone_sample import GemstoneSample
+from commonlims.utility.submission_handler import GemstoneSubmissionHandler
 from commonlims.test.resources.resource_bag import gemstone_csv_path
 from commonlims.test.resources.resource_bag import read_gemstone_csv
 
 
 class TestSampleSubmissionCsv(TestCase):
     def setUp(self):
-        self.org = create_organization()
-        self.gemstone_sample_type = create_gemstone_substance_type(org=self.org)
+        plugin = create_plugin(self.organization)
+        self.register_extensible(GemstoneSample, plugin)
+        self.handler_context = HandlerContext(self.organization)
 
     def _create_csv_organization_file(self):
         name = os.path.basename(gemstone_csv_path())
@@ -32,7 +31,7 @@ class TestSampleSubmissionCsv(TestCase):
         contents = read_gemstone_csv()
         file_like_obj = BytesIO(contents)
         file_model.putfile(file_like_obj)
-        return OrganizationFile(name=name, organization=self.org, file=file_model)
+        return OrganizationFile(name=name, organization=self.organization, file=file_model)
 
     def test_import_csv_here__with_6_gemstone_samples__6_sample_instances_created(self):
         csv = Csv(gemstone_csv_path())
@@ -45,9 +44,8 @@ class TestSampleSubmissionCsv(TestCase):
                 'preciousness': preciousness,
                 'color': color,
             }
-            sample =substances.create(
-                name=name, extensible_type=self.gemstone_sample_type,
-                organization=self.org, properties=props)
+            sample = self.app.extensibles.create(
+                name, GemstoneSample, self.organization, properties=props)
             created_samples.append(sample)
         self.assertEqual(6, len(created_samples))
 
@@ -61,7 +59,7 @@ class TestSampleSubmissionCsv(TestCase):
         contents = read_gemstone_csv()
         file_like_obj = BytesIO(contents)
         file_model.putfile(file_like_obj)
-        myfile = OrganizationFile(name=name, organization=self.org, file=file_model)
+        myfile = OrganizationFile(name=name, organization=self.organization, file=file_model)
         with file_model.getfile() as src:
             for chunk in src.chunks():
                 print(type(chunk))
@@ -87,15 +85,14 @@ class TestSampleSubmissionCsv(TestCase):
                 'preciousness': preciousness,
                 'color': color,
             }
-            sample =substances.create(
-                name=name, extensible_type=self.gemstone_sample_type,
-                organization=self.org, properties=props)
+            sample = self.app.extensibles.create(
+                name, GemstoneSample, self.organization, properties=props)
             created_samples.append(sample)
         self.assertEqual(6, len(created_samples))
         assert 'gemstone1-project1' == created_samples[0].name
 
     def test_run_gemstone_sample_submission_handler__with_csv__6_samples_found_in_db(self):
-        handler = GemstoneSubstancesSubmission()
+        handler = GemstoneSubmissionHandler(context=self.handler_context, app=self.app)
         sample_sub_file = self._create_csv_organization_file()
         handler.handle(sample_sub_file)
         all_samples = Substance.objects.all()
@@ -111,7 +108,7 @@ class TestSampleSubmissionCsv(TestCase):
         assert set(expected_sample_names).issubset(set(all_sample_names))
 
     def test_import_same_samples_twice__integrity_error(self):
-        handler = GemstoneSubstancesSubmission()
+        handler = GemstoneSubmissionHandler(context=self.handler_context, app=self.app)
         sample_sub_file = self._create_csv_organization_file()
         with self.assertRaises(IntegrityError):
             handler.handle(sample_sub_file)

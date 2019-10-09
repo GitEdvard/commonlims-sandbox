@@ -1,24 +1,25 @@
 from __future__ import absolute_import
 import openpyxl as xl
 import os
-from unittest import skip
 from six import BytesIO
 from pprint import pprint
 from sentry.testutils import TestCase
 from sentry.models.file import File
 from clims.models.file import OrganizationFile
 from clims.models.substance import Substance
-from sentry_plugins.snpseq.plugin.handlers import GemstoneSubstancesSubmission
-from commonlims.utility.test_utils import create_organization
-from commonlims.utility.test_utils import create_gemstone_substance_type
+from clims.handlers import HandlerContext
+from commonlims.utility.gemstone_sample import GemstoneSample
+from commonlims.utility.test_utils import create_plugin
 from commonlims.test.resources.resource_bag import gemstone_xlsx_path
 from commonlims.test.resources.resource_bag import read_gemstone_xlsx
+from commonlims.utility.submission_handler import GemstoneSubmissionHandler
 
 
 class TestSampleSubmissionXlsx(TestCase):
     def setUp(self):
-        self.org = create_organization()
-        self.gemstone_sample_type = create_gemstone_substance_type(org=self.org)
+        plugin = create_plugin(self.organization)
+        self.register_extensible(GemstoneSample, plugin)
+        self.handler_context = HandlerContext(self.organization)
 
     def _create_xlsx_organization_file(self):
         name = os.path.basename(gemstone_xlsx_path())
@@ -30,7 +31,7 @@ class TestSampleSubmissionXlsx(TestCase):
         contents = read_gemstone_xlsx()
         file_like_obj = BytesIO(contents)
         file_model.putfile(file_like_obj)
-        return OrganizationFile(name=name, organization=self.org, file=file_model)
+        return OrganizationFile(name=name, organization=self.organization, file=file_model)
 
     def _as_rows(self, orgfile):
         """
@@ -93,7 +94,7 @@ class TestSampleSubmissionXlsx(TestCase):
 
     def test_gemstone_submission_handler__with_xlsx__3_samples_found(self):
         file = self._create_xlsx_organization_file()
-        handler = GemstoneSubstancesSubmission()
+        handler = GemstoneSubmissionHandler(context=self.handler_context, app=self.app)
         handler.handle(file)
         all_samples = Substance.objects.all()
         all_sample_names = [sample.name for sample in all_samples]

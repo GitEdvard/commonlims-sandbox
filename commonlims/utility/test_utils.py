@@ -2,31 +2,32 @@ from __future__ import absolute_import
 from sentry.models.organization import Organization
 from clims.models.plugin_registration import PluginRegistration
 from clims.models.extensible import ExtensiblePropertyType
-from uuid import uuid4
-# from clims.services.substance import substances
-from clims.services.extensible import extensibles
+from clims.services.application import ApplicationService
 
 
-def create_organization():
-    org = Organization.objects.get(name='lab')
+def create_organization_new(self, name=None, owner=None, **kwargs):
+    org = Organization.objects.create(name=name, **kwargs)
+    if owner:
+        self.create_member(
+            organization=org,
+            user=owner,
+            role='owner',
+        )
     return org
 
 
 def create_plugin(org=None):
-    org = org or create_organization()
     plugin, _ = PluginRegistration.objects.get_or_create(
         name='tests_utils.create_plugin', version='1.0.0', organization=org)
     return plugin
 
 
-def create_gemstone_substance_type(org=None, plugin=None, properties=None):
+def create_substance_type_for_sample(type_name=None, org=None, plugin=None, properties=None):
     properties = properties or [
-        dict(name='color', raw_type=ExtensiblePropertyType.STRING, display_name='Col.'),
-        dict(name='preciousness', raw_type=ExtensiblePropertyType.STRING, display_name='Prec.'),
-        dict(name='payload', raw_type=ExtensiblePropertyType.JSON, display_name='Payload'),
+        dict(name='concentration', raw_type=ExtensiblePropertyType.FLOAT, display_name='Concentration'),
     ]
     plugin = plugin or create_plugin()
-    substance_type = extensibles._register_model('GemstoneSample', org, plugin, property_types=properties)
-    # substance_type = extensibles.register('GemstoneSample', org, plugin, properties=properties)
+    app = ApplicationService()
+    substance_type = app.extensibles._register_model(type_name, org, plugin, property_types=properties)
 
     return substance_type
