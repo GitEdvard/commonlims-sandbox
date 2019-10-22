@@ -1,26 +1,44 @@
 import os
 import pytest
+import logging
 from six import BytesIO
 from sentry.models.file import File
 from sentry.testutils import TestCase
-from sentry_plugins.snpseq.plugin.handlers import SampleSubmissionHandler
-from sentry_plugins.snpseq.plugin.models import Sample
+from sentry_plugins.snpseq.plugin.models import PrepSample
+from sentry_plugins.snpseq.plugin.models import RmlSample
+from sentry_plugins.snpseq.plugin.models import Pool
+from sentry_plugins.snpseq.plugin.models import Plate96
 from sentry_plugins.snpseq.plugin.services.sample import SampleService
+from sentry_plugins.snpseq.plugin.services.container import ContainerRepository
+from sentry_plugins.snpseq.plugin.handlers import SampleSubmissionPrep
+from sentry_plugins.snpseq.plugin.handlers import SampleSubmissionHandler
 from sentry.plugins import plugins
 from clims.models.file import OrganizationFile
 from clims.models.substance import Substance
 from clims.handlers import HandlerContext
 from clims.handlers import SubstancesSubmissionHandler
-from clims.services.application import ApplicationService
-from clims.services.extensible import ExtensibleTypeNotRegistered
 from commonlims.test.resources.resource_bag import prep_samples_xlsx_path
+from commonlims.test.resources.resource_bag import rml_samples_xlsx_path
+from commonlims.test.resources.resource_bag import not_a_samplesubmission_path
 from commonlims.test.resources.resource_bag import read_binary_file
+from clims.models.container import ContainerType
 
 
 class TestSampleSubmission(TestCase):
     def setUp(self):
         self.handler_context = HandlerContext(organization=self.organization)
-        self.register_extensible(Sample)
+        self.register_extensible(PrepSample)
+        self.register_extensible(RmlSample)
+        self.register_extensible(Pool)
+        self.register_extensible(Plate96)
+        logger = logging.getLogger('clims.files')
+        logger.setLevel(logging.CRITICAL)
+
+    def _create_plate96(self):
+        ct = ContainerType(name='Plate96')
+        ct.rows = 8
+        ct.cols = 12
+        ct.save()
 
 
     def _create_organization_file(self, file_path):
@@ -52,10 +70,12 @@ class TestSampleSubmission(TestCase):
     def test_sample_prep__3_samples_are_created(self):
         # Arrange
         file = self._create_organization_file(prep_samples_xlsx_path())
-        handler = SampleSubmissionHandler(context=self.handler_context, app=self.app)
+        workbook = file.as_excel()
+        sample_list_sheet = workbook['Sample list']
+        handler = SampleSubmissionPrep(organization=self.handler_context.organization)
 
         # Act
-        handler.handle(file_obj=file)
+        handler.handle(sample_list_sheet)
 
         # Assert
         expected = [
@@ -70,14 +90,16 @@ class TestSampleSubmission(TestCase):
     def test_sample_prep__3_concentration_values_ok_fetched_from_substance_type(self):
         # Arrange
         file = self._create_organization_file(prep_samples_xlsx_path())
-        handler = SampleSubmissionHandler(context=self.handler_context, app=self.app)
+        workbook = file.as_excel()
+        sample_list_sheet = workbook['Sample list']
+        handler = SampleSubmissionPrep(organization=self.handler_context.organization)
 
         # Act
-        handler.handle(file_obj=file)
+        handler.handle(sample_list_sheet)
 
         # Assert
         expected = {
-            'sample1': 100,
+            'sample1': 101,
             'sample2': 10,
             'sample3': 10,
         }
@@ -95,14 +117,16 @@ class TestSampleSubmission(TestCase):
     def test_sample_prep__with_direct_call_to_handler__3_concentration_values_ok(self):
         # Arrange
         file = self._create_organization_file(prep_samples_xlsx_path())
-        handler = SampleSubmissionHandler(context=self.handler_context, app=self.app)
+        workbook = file.as_excel()
+        sample_list_sheet = workbook['Sample list']
+        handler = SampleSubmissionPrep(organization=self.handler_context.organization)
 
         # Act
-        handler.handle(file_obj=file)
+        handler.handle(sample_list_sheet)
 
         # Assert
         expected = {
-            'sample1': 100,
+            'sample1': 101,
             'sample2': 10,
             'sample3': 10,
         }
@@ -113,18 +137,6 @@ class TestSampleSubmission(TestCase):
             conc_dict[sample.name] = sample.concentration
 
         assert expected == conc_dict
-
-    def test_sample_service__with_new_app_instance__exception(self):
-        # Arrange
-        s = Sample(name='sample1', organization=self.organization)
-        s.save()
-        new_app_instance = ApplicationService()
-        samples = SampleService(new_app_instance)
-
-        # Act
-        # Assert
-        with pytest.raises(ExtensibleTypeNotRegistered):
-            samples.all()
 
     def test_sample_prep__with_use_of_load_file__3_concentration_values_ok(self):
         # Arrange
@@ -137,7 +149,7 @@ class TestSampleSubmission(TestCase):
 
         # Assert
         expected = {
-            'sample1': 100,
+            'sample1': 101,
             'sample2': 10,
             'sample3': 10,
         }
@@ -148,3 +160,199 @@ class TestSampleSubmission(TestCase):
             conc_dict[sample.name] = sample.concentration
 
         assert expected == conc_dict
+
+    def test_sample_prep__all_udf_good(self):
+        # Arrange
+        contents = read_binary_file(prep_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        samples = SampleService(self.app)
+        fetched_sample1 = samples.get(name='YY-1111-sample1')
+        fetched_sample2 = samples.get(name='YY-1111-sample2')
+        fetched_sample3 = samples.get(name='YY-1111-sample3')
+
+        assert fetched_sample2.number_of_lanes == '1 lane/pool'
+        assert fetched_sample3.number_of_lanes == '1 lane/pool'
+
+        assert fetched_sample1.name == 'YY-1111-sample1'
+        assert fetched_sample1.external_name == 'sample1'
+        assert fetched_sample1.concentration == 101
+        assert fetched_sample1.volume == 30
+        assert fetched_sample1.sample_type == 'gDNA'
+        assert fetched_sample1.coverage == '60x'
+        assert fetched_sample1.volume_current == 30
+        assert fetched_sample1.sample_delivery_date == '190829'
+        assert fetched_sample1.container == 'YY-1111_PL1_org_190829'
+        assert fetched_sample1.application == 'WG re-seq'
+        assert fetched_sample1.species == 'Bos taurus'
+        assert fetched_sample1.library_preparation_kit == 'TruSeq DNA PCR-Free Sample Preparation kit LT'
+        assert fetched_sample1.libraries_per_sample == 1
+        assert fetched_sample1.insert_size == '350'
+        assert fetched_sample1.pooling == '10 libraries/pool'
+        assert fetched_sample1.number_of_lanes == '2 flowcells/pool'
+        assert fetched_sample1.special_info_library_prep is False
+        assert fetched_sample1.seq_instrument == 'NovaSeq S4'
+        assert fetched_sample1.read_length == '151x2'
+        assert fetched_sample1.conc_flowcell_pm == '300 pM'
+        assert fetched_sample1.phix_percent == 1
+        assert fetched_sample1.custom_seq_primer is False
+        assert fetched_sample1.special_info_sequencing is False
+        assert fetched_sample1.genotyping_id_panel is False
+        assert fetched_sample1.data_analysis == 'No'
+
+    def test_ready_made_libraries__all_udf_good(self):
+        # Arrange
+        contents = read_binary_file(rml_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        samples = SampleService(self.app)
+        fetched_rml2 = samples.get(name='XX-1111-rml2')
+        assert fetched_rml2.external_name == 'rml2'
+        assert fetched_rml2.concentration == 2
+        assert fetched_rml2.volume == 30
+        assert fetched_rml2.sample_type == 'Ready-made library'
+        assert fetched_rml2.application == 'Ready-made library'
+        assert fetched_rml2.index_category == 'None'
+        assert fetched_rml2.index_number == '64-160'
+        assert fetched_rml2.custom_index == 'GTCCGGC-AACCGAT'
+        assert fetched_rml2.sample_index == 'Custom (GTCCGGC-AACCGAT)'
+
+        assert fetched_rml2.volume_current == 30
+        assert fetched_rml2.sample_delivery_date == '190529'
+        assert fetched_rml2.container == 'XX-1111_PL1_org_190529'
+        assert fetched_rml2.species == 'Vulpes lagopus'
+        assert fetched_rml2.seq_instrument == 'HiSeqX'
+        assert fetched_rml2.read_length == '151x2'
+        assert fetched_rml2.number_of_lanes == '2 lanes/pool'
+        assert fetched_rml2.conc_flowcell_pm == 'To be decided after QC'
+        assert fetched_rml2.phix_percent == 1
+        assert fetched_rml2.custom_seq_primer is False
+        assert fetched_rml2.special_info_sequencing is False
+        assert fetched_rml2.rml_kit_protocol == 'Meyer&Kircher 2010'
+
+    def test_decide_type__with_prep_submission(self):
+        # Arrange
+        file = self._create_organization_file(prep_samples_xlsx_path())
+        workbook = file.as_excel()
+        sample_list_sheet = workbook['Sample list']
+
+        # Act
+        handler = SampleSubmissionHandler(self.handler_context, self.app)
+        htype = handler._determine_type(sample_list_sheet)
+        assert htype == 'prep'
+
+    def test_decide_type__with_rml_submission(self):
+        # Arrange
+        file = self._create_organization_file(rml_samples_xlsx_path())
+        workbook = file.as_excel()
+        sample_list_sheet = workbook['Sample list']
+
+        # Act
+        handler = SampleSubmissionHandler(self.handler_context, self.app)
+        htype = handler._determine_type(sample_list_sheet)
+        assert htype == 'rml'
+
+    def test_decide_type__with_another_xls_sheet(self):
+        # Arrange
+        file = self._create_organization_file(not_a_samplesubmission_path())
+        workbook = file.as_excel()
+        sample_list_sheet = workbook['Sample list']
+
+        # Act
+        handler = SampleSubmissionHandler(self.handler_context, self.app)
+        with pytest.raises(ImportError):
+            handler._determine_type(sample_list_sheet)
+
+    def test_prep_submission__with_three_samples_on_same_plate__one_plate_created(self):
+        # Arrange
+        contents = read_binary_file(prep_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        containers = ContainerRepository(self.organization)
+        fetched_plate = containers.get(name='YY-1111_PL1_org_190829')
+
+        assert fetched_plate is not None
+        assert fetched_plate.name == 'YY-1111_PL1_org_190829'
+
+    @pytest.mark.skip('waiting for new implementation of container')
+    def test_prep_submission__with_3_samples_on_plate__sample_navigation_to_plate_is_ok(self):
+        # Arrange
+        contents = read_binary_file(prep_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        samples = SampleService(self.app)
+        fetched_sample1 = samples.get(name='sample1')
+        from clims.models.location import Location
+        from clims.models.container import Container
+        assert isinstance(fetched_sample1.location, Location)
+        assert isinstance(fetched_sample1.location.container, Container)
+        assert isinstance(fetched_sample1.container, Plate96)
+
+    @pytest.mark.skip('Waiting for new implementation of container')
+    def test_prep_submission__with_3_samples_on_plate__plate_navigation_to_sample_ok(self):
+        # Arrange
+        contents = read_binary_file(prep_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        containers = ContainerRepository(self.app)
+        plate1 = containers.get(name='YY-1111_PL1_org_190829')
+        assert plate1 is not None
+        assert plate1['A:1'].name == 'sample1'
+
+    def test_rml_submission__with_three_samples_on_same_plate__one_plate_created(self):
+        # Arrange
+        contents = read_binary_file(rml_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        containers = ContainerRepository(self.app)
+        fetched_plate = containers.get(name='XX-1111_PL1_org_190529')
+
+        assert fetched_plate is not None
+
+    @pytest.mark.now
+    def test_rml_submission__with_three_samples__one_pool_created(self):
+        # Arrange
+        contents = read_binary_file(rml_samples_xlsx_path())
+        fileobj = BytesIO(contents)
+
+        # Act
+        plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+
+        # Assert
+        samples = SampleService(self.app)
+        pool = samples.get(name='XX-1111-Pool1')
+        assert pool is not None
+        assert pool.volume == 30
+        assert pool.concentration == 0.63
+        assert len(pool.parents) == 4

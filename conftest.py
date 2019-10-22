@@ -5,7 +5,7 @@ pytest_plugins = [
     'sentry.utils.pytest.sentry',
 ]
 
-with open(".skiptests") as f:
+with open("/home/edeng655-local/source/commonlims-sandbox/.skiptests") as f:
     # Extra skips should be of the format <class_name>.<function_name>, as that
     # is the format pytest reports by default in the failure report
     extra_skips = {line.strip() for line in f.readlines()}
