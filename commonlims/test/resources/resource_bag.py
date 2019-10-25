@@ -25,7 +25,19 @@ def gemstone_xlsx_path():
     return sample_submission_path
 
 
-def prep_samples_xlsx_path():
+def prep_sample_submission_path_csv():
+    here_dir = os.path.dirname(__file__)
+    sample_submission_path = os.path.join(here_dir, 'samplesubmission_prep_samples.csv')
+    return sample_submission_path
+
+
+def rml_sample_submission_path_csv():
+    here_dir = os.path.dirname(__file__)
+    sample_submission_path = os.path.join(here_dir, 'samplesubmission_rml.csv')
+    return sample_submission_path
+
+
+def prep_sample_submission_path():
     here_dir = os.path.dirname(__file__)
     sample_submission_path = os.path.join(here_dir, 'samplesubmission_prep_samples.xlsx')
     return sample_submission_path
@@ -37,7 +49,7 @@ def not_a_samplesubmission_path():
     return sample_submission_path
 
 
-def rml_samples_xlsx_path():
+def rml_sample_submission_path():
     here_dir = os.path.dirname(__file__)
     sample_submission_path = os.path.join(here_dir, 'samplesubmission_rml.xlsx')
     return sample_submission_path

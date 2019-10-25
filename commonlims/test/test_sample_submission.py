@@ -10,21 +10,28 @@ from sentry_plugins.snpseq.plugin.models import Pool
 from sentry_plugins.snpseq.plugin.models import Plate96
 from sentry_plugins.snpseq.plugin.services.sample import SampleService
 from sentry_plugins.snpseq.plugin.services.container import ContainerRepository
-from sentry_plugins.snpseq.plugin.handlers import SampleSubmissionPrep
-from sentry_plugins.snpseq.plugin.handlers import SampleSubmissionHandler
+from sentry_plugins.snpseq.plugin.handlers.sample_submission import SampleSubmissionPrep
+from sentry_plugins.snpseq.plugin.handlers.sample_submission import SampleSubmissionHandler
+from sentry_plugins.snpseq.plugin.handlers.sample_submission import ContentsBag
 from sentry.plugins import plugins
 from clims.models.file import OrganizationFile
 from clims.models.substance import Substance
 from clims.handlers import HandlerContext
 from clims.handlers import SubstancesSubmissionHandler
-from commonlims.test.resources.resource_bag import prep_samples_xlsx_path
-from commonlims.test.resources.resource_bag import rml_samples_xlsx_path
-from commonlims.test.resources.resource_bag import not_a_samplesubmission_path
+from clims.services.file_service.csv import Csv
+from commonlims.test.resources.resource_bag import prep_sample_submission_path
+from commonlims.test.resources.resource_bag import prep_sample_submission_path_csv
+from commonlims.test.resources.resource_bag import rml_sample_submission_path_csv
 from commonlims.test.resources.resource_bag import read_binary_file
 from clims.models.container import ContainerType
 
 
 class TestSampleSubmission(TestCase):
+    @pytest.fixture(scope='session', autouse=True)
+    def monkey_patch_file_parser_to_csv(self):
+        SampleSubmissionHandler._fetch_file_contents = \
+            lambda selff, file_obj: ReplaceWith.contents_bag
+
     def setUp(self):
         self.handler_context = HandlerContext(organization=self.organization)
         self.register_extensible(PrepSample)
@@ -39,7 +46,6 @@ class TestSampleSubmission(TestCase):
         ct.rows = 8
         ct.cols = 12
         ct.save()
-
 
     def _create_organization_file(self, file_path):
         name = os.path.basename(file_path)
@@ -56,7 +62,7 @@ class TestSampleSubmission(TestCase):
     @pytest.mark.skip('csv prop removed, save for dimension is written here')
     def test_sample_prep__number_rows_and_columns_are_ok(self):
         # Arrange
-        file = self._create_organization_file(prep_samples_xlsx_path())
+        file = self._create_organization_file(prep_sample_submission_path())
         handler = SampleSubmissionHandler(context=self.handler_context, app=self.app)
 
         # Act
@@ -69,19 +75,21 @@ class TestSampleSubmission(TestCase):
 
     def test_sample_prep__3_samples_are_created(self):
         # Arrange
-        file = self._create_organization_file(prep_samples_xlsx_path())
-        workbook = file.as_excel()
-        sample_list_sheet = workbook['Sample list']
+        parser = CsvParser(
+            handler_type='prep', project_code='YY-1111', path=prep_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
+
         handler = SampleSubmissionPrep(organization=self.handler_context.organization)
 
         # Act
-        handler.handle(sample_list_sheet)
+        handler.handle(ReplaceWith.contents_bag.sample_list)
 
         # Assert
         expected = [
-            'sample1',
-            'sample2',
-            'sample3',
+            'YY-1111-sample1',
+            'YY-1111-sample2',
+            'YY-1111-sample3',
         ]
         all_samples = Substance.objects.all()
         sample_names = [s.name for s in all_samples]
@@ -89,19 +97,17 @@ class TestSampleSubmission(TestCase):
 
     def test_sample_prep__3_concentration_values_ok_fetched_from_substance_type(self):
         # Arrange
-        file = self._create_organization_file(prep_samples_xlsx_path())
-        workbook = file.as_excel()
-        sample_list_sheet = workbook['Sample list']
+        ReplaceWith.contents_bag = CsvParser('prep', 'YY-1111', prep_sample_submission_path_csv())
         handler = SampleSubmissionPrep(organization=self.handler_context.organization)
 
         # Act
-        handler.handle(sample_list_sheet)
+        handler.handle(ReplaceWith.contents_bag.csv)
 
         # Assert
         expected = {
-            'sample1': 101,
-            'sample2': 10,
-            'sample3': 10,
+            'YY-1111-sample1': 101,
+            'YY-1111-sample2': 10,
+            'YY-1111-sample3': 10,
         }
         all_substances = Substance.objects.all()
         sample_concentrations = dict()
@@ -116,21 +122,19 @@ class TestSampleSubmission(TestCase):
 
     def test_sample_prep__with_direct_call_to_handler__3_concentration_values_ok(self):
         # Arrange
-        file = self._create_organization_file(prep_samples_xlsx_path())
-        workbook = file.as_excel()
-        sample_list_sheet = workbook['Sample list']
+        ReplaceWith.contents_bag = CsvParser('prep', 'YY-1111', prep_sample_submission_path_csv())
         handler = SampleSubmissionPrep(organization=self.handler_context.organization)
 
         # Act
-        handler.handle(sample_list_sheet)
+        handler.handle(ReplaceWith.contents_bag.csv)
 
         # Assert
         expected = {
-            'sample1': 101,
-            'sample2': 10,
-            'sample3': 10,
+            'YY-1111-sample1': 101,
+            'YY-1111-sample2': 10,
+            'YY-1111-sample3': 10,
         }
-        samples = SampleService(self.app)
+        samples = SampleService()
         all_samples = samples.all()
         conc_dict = dict()
         for sample in all_samples:
@@ -140,20 +144,22 @@ class TestSampleSubmission(TestCase):
 
     def test_sample_prep__with_use_of_load_file__3_concentration_values_ok(self):
         # Arrange
-        contents = read_binary_file(prep_samples_xlsx_path())
-        fileobj = BytesIO(contents)
+        parser = CsvParser(
+            handler_type='prep', project_code='YY-1111', path=prep_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
 
         # Act
         plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
-        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
         expected = {
-            'sample1': 101,
-            'sample2': 10,
-            'sample3': 10,
+            'YY-1111-sample1': 101,
+            'YY-1111-sample2': 10,
+            'YY-1111-sample3': 10,
         }
-        samples = SampleService(self.app)
+        samples = SampleService()
         all_samples = samples.all()
         conc_dict = dict()
         for sample in all_samples:
@@ -163,15 +169,17 @@ class TestSampleSubmission(TestCase):
 
     def test_sample_prep__all_udf_good(self):
         # Arrange
-        contents = read_binary_file(prep_samples_xlsx_path())
-        fileobj = BytesIO(contents)
+        parser = CsvParser(
+            handler_type='prep', project_code='YY-1111', path=prep_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
 
         # Act
         plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
-        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        samples = SampleService(self.app)
+        samples = SampleService()
         fetched_sample1 = samples.get(name='YY-1111-sample1')
         fetched_sample2 = samples.get(name='YY-1111-sample2')
         fetched_sample3 = samples.get(name='YY-1111-sample3')
@@ -207,22 +215,24 @@ class TestSampleSubmission(TestCase):
 
     def test_ready_made_libraries__all_udf_good(self):
         # Arrange
-        contents = read_binary_file(rml_samples_xlsx_path())
-        fileobj = BytesIO(contents)
+        parser = CsvParser(
+            handler_type='rml', project_code='XX-1111', path=rml_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
 
         # Act
         plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
-        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        samples = SampleService(self.app)
+        samples = SampleService()
         fetched_rml2 = samples.get(name='XX-1111-rml2')
         assert fetched_rml2.external_name == 'rml2'
         assert fetched_rml2.concentration == 2
         assert fetched_rml2.volume == 30
         assert fetched_rml2.sample_type == 'Ready-made library'
         assert fetched_rml2.application == 'Ready-made library'
-        assert fetched_rml2.index_category == 'None'
+        assert fetched_rml2.index_category is None
         assert fetched_rml2.index_number == '64-160'
         assert fetched_rml2.custom_index == 'GTCCGGC-AACCGAT'
         assert fetched_rml2.sample_index == 'Custom (GTCCGGC-AACCGAT)'
@@ -240,47 +250,16 @@ class TestSampleSubmission(TestCase):
         assert fetched_rml2.special_info_sequencing is False
         assert fetched_rml2.rml_kit_protocol == 'Meyer&Kircher 2010'
 
-    def test_decide_type__with_prep_submission(self):
-        # Arrange
-        file = self._create_organization_file(prep_samples_xlsx_path())
-        workbook = file.as_excel()
-        sample_list_sheet = workbook['Sample list']
-
-        # Act
-        handler = SampleSubmissionHandler(self.handler_context, self.app)
-        htype = handler._determine_type(sample_list_sheet)
-        assert htype == 'prep'
-
-    def test_decide_type__with_rml_submission(self):
-        # Arrange
-        file = self._create_organization_file(rml_samples_xlsx_path())
-        workbook = file.as_excel()
-        sample_list_sheet = workbook['Sample list']
-
-        # Act
-        handler = SampleSubmissionHandler(self.handler_context, self.app)
-        htype = handler._determine_type(sample_list_sheet)
-        assert htype == 'rml'
-
-    def test_decide_type__with_another_xls_sheet(self):
-        # Arrange
-        file = self._create_organization_file(not_a_samplesubmission_path())
-        workbook = file.as_excel()
-        sample_list_sheet = workbook['Sample list']
-
-        # Act
-        handler = SampleSubmissionHandler(self.handler_context, self.app)
-        with pytest.raises(ImportError):
-            handler._determine_type(sample_list_sheet)
-
     def test_prep_submission__with_three_samples_on_same_plate__one_plate_created(self):
         # Arrange
-        contents = read_binary_file(prep_samples_xlsx_path())
-        fileobj = BytesIO(contents)
+        parser = CsvParser(
+            handler_type='prep', project_code='YY-1111', path=prep_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
 
         # Act
         plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
-        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
         containers = ContainerRepository(self.organization)
@@ -292,7 +271,7 @@ class TestSampleSubmission(TestCase):
     @pytest.mark.skip('waiting for new implementation of container')
     def test_prep_submission__with_3_samples_on_plate__sample_navigation_to_plate_is_ok(self):
         # Arrange
-        contents = read_binary_file(prep_samples_xlsx_path())
+        contents = read_binary_file(prep_sample_submission_path())
         fileobj = BytesIO(contents)
 
         # Act
@@ -300,7 +279,7 @@ class TestSampleSubmission(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
 
         # Assert
-        samples = SampleService(self.app)
+        samples = SampleService()
         fetched_sample1 = samples.get(name='sample1')
         from clims.models.location import Location
         from clims.models.container import Container
@@ -311,7 +290,7 @@ class TestSampleSubmission(TestCase):
     @pytest.mark.skip('Waiting for new implementation of container')
     def test_prep_submission__with_3_samples_on_plate__plate_navigation_to_sample_ok(self):
         # Arrange
-        contents = read_binary_file(prep_samples_xlsx_path())
+        contents = read_binary_file(prep_sample_submission_path())
         fileobj = BytesIO(contents)
 
         # Act
@@ -319,22 +298,25 @@ class TestSampleSubmission(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
 
         # Assert
-        containers = ContainerRepository(self.app)
+        containers = ContainerRepository(self.organization)
         plate1 = containers.get(name='YY-1111_PL1_org_190829')
         assert plate1 is not None
         assert plate1['A:1'].name == 'sample1'
 
+    @pytest.mark.now
     def test_rml_submission__with_three_samples_on_same_plate__one_plate_created(self):
         # Arrange
-        contents = read_binary_file(rml_samples_xlsx_path())
-        fileobj = BytesIO(contents)
+        parser = CsvParser(
+            handler_type='rml', project_code='XX-1111', path=rml_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
 
         # Act
         plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
-        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        containers = ContainerRepository(self.app)
+        containers = ContainerRepository(self.organization)
         fetched_plate = containers.get(name='XX-1111_PL1_org_190529')
 
         assert fetched_plate is not None
@@ -342,17 +324,40 @@ class TestSampleSubmission(TestCase):
     @pytest.mark.now
     def test_rml_submission__with_three_samples__one_pool_created(self):
         # Arrange
-        contents = read_binary_file(rml_samples_xlsx_path())
-        fileobj = BytesIO(contents)
+        parser = CsvParser(
+            handler_type='rml', project_code='XX-1111', path=rml_sample_submission_path_csv())
+        ReplaceWith.contents_bag = ContentsBag(
+            handler_type=parser.handler_type, project_code=parser.project_code, sample_list=parser.csv)
 
         # Act
         plugins.load_handler_implementation(SubstancesSubmissionHandler, SampleSubmissionHandler)
-        self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
+        self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        samples = SampleService(self.app)
+        samples = SampleService()
         pool = samples.get(name='XX-1111-Pool1')
         assert pool is not None
         assert pool.volume == 30
         assert pool.concentration == 0.63
         assert len(pool.parents) == 4
+
+
+class FakeFileObj():
+    def read(self, dummy):
+        pass
+
+
+class CsvParser(object):
+    def __init__(self, handler_type, project_code, path):
+        self.handler_type = handler_type
+        self.project_code = project_code
+        self.path = path
+        self.csv = Csv(self.path, delim='\t')
+
+
+class ReplaceWith(object):
+    contents_bag = None
+
+
+fake_file_obj = FakeFileObj()
+

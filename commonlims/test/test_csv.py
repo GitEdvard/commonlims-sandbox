@@ -4,6 +4,7 @@ import pytest
 from unittest import skip
 from commonlims.test.resources.resource_bag import gemstone_csv_path
 from commonlims.test.resources.resource_bag import read_gemstone_csv
+from commonlims.test.resources.resource_bag import rml_sample_submission_path_csv
 
 
 class TestCsv(unittest.TestCase):
@@ -35,4 +36,12 @@ class TestCsv(unittest.TestCase):
         for line in csv:
             print(line['Color'])
 
-        self.assertEqual(1, 1)
+        assert 1 == 1
+
+    def test_open_sample_submission_as_csv__columns_reference_working(self):
+        from clims.services.file_service.csv import Csv
+        csv = Csv(rml_sample_submission_path_csv(), delim='\t')
+        for line in csv:
+            print(line['LIBRARY ID'])
+
+        assert 1 == 1
