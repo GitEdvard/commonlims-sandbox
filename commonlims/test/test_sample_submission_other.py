@@ -8,12 +8,12 @@ from sentry.models.file import File
 from clims.handlers import SubstancesSubmissionHandler
 from clims.handlers import HandlerContext
 from clims.models.file import OrganizationFile
+from clims.services.application import ioc
 from sentry_plugins.snpseq.plugin.models import PrepSample
 from sentry_plugins.snpseq.plugin.models import RmlSample
 from sentry_plugins.snpseq.plugin.models import Pool
 from sentry_plugins.snpseq.plugin.models import Plate96
 from sentry_plugins.snpseq.plugin.handlers.sample_submission import SampleSubmissionHandler
-from sentry_plugins.snpseq.plugin.services.sample import SampleService
 from sentry.plugins import plugins
 from commonlims.test.resources.resource_bag import prep_sample_submission_path
 from commonlims.test.resources.resource_bag import read_binary_file
@@ -64,8 +64,7 @@ class TestSampleSubmissionOther(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", file_obj)
 
         # Assert
-        samples = SampleService()
-        fetched_sample1 = samples.get(name='YY-1111-sample1')
+        fetched_sample1 = ioc.app.substances.get_by_name('YY-1111-sample1')
 
         assert fetched_sample1.concentration == 101
         assert fetched_sample1.external_name == 'sample1'

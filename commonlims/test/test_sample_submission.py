@@ -8,7 +8,6 @@ from sentry_plugins.snpseq.plugin.models import PrepSample
 from sentry_plugins.snpseq.plugin.models import RmlSample
 from sentry_plugins.snpseq.plugin.models import Pool
 from sentry_plugins.snpseq.plugin.models import Plate96
-from sentry_plugins.snpseq.plugin.services.sample import SampleService
 from sentry_plugins.snpseq.plugin.services.container import ContainerRepository
 from sentry_plugins.snpseq.plugin.handlers.sample_submission import SampleSubmissionPrep
 from sentry_plugins.snpseq.plugin.handlers.sample_submission import SampleSubmissionHandler
@@ -19,6 +18,7 @@ from clims.models.substance import Substance
 from clims.handlers import HandlerContext
 from clims.handlers import SubstancesSubmissionHandler
 from clims.services.file_service.csv import Csv
+from clims.services.application import ioc
 from commonlims.test.resources.resource_bag import prep_sample_submission_path
 from commonlims.test.resources.resource_bag import prep_sample_submission_path_csv
 from commonlims.test.resources.resource_bag import rml_sample_submission_path_csv
@@ -134,8 +134,7 @@ class TestSampleSubmission(TestCase):
             'YY-1111-sample2': 10,
             'YY-1111-sample3': 10,
         }
-        samples = SampleService()
-        all_samples = samples.all()
+        all_samples = ioc.app.substances.filter()
         conc_dict = dict()
         for sample in all_samples:
             conc_dict[sample.name] = sample.concentration
@@ -159,8 +158,7 @@ class TestSampleSubmission(TestCase):
             'YY-1111-sample2': 10,
             'YY-1111-sample3': 10,
         }
-        samples = SampleService()
-        all_samples = samples.all()
+        all_samples = ioc.app.substances.filter()
         conc_dict = dict()
         for sample in all_samples:
             conc_dict[sample.name] = sample.concentration
@@ -179,7 +177,7 @@ class TestSampleSubmission(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        samples = SampleService()
+        samples = ioc.app.substances
         fetched_sample1 = samples.get(name='YY-1111-sample1')
         fetched_sample2 = samples.get(name='YY-1111-sample2')
         fetched_sample3 = samples.get(name='YY-1111-sample3')
@@ -225,8 +223,7 @@ class TestSampleSubmission(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        samples = SampleService()
-        fetched_rml2 = samples.get(name='XX-1111-rml2')
+        fetched_rml2 = ioc.app.substances.get_by_name('XX-1111-rml2')
         assert fetched_rml2.external_name == 'rml2'
         assert fetched_rml2.concentration == 2
         assert fetched_rml2.volume == 30
@@ -279,8 +276,7 @@ class TestSampleSubmission(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", fileobj)
 
         # Assert
-        samples = SampleService()
-        fetched_sample1 = samples.get(name='sample1')
+        fetched_sample1 = ioc.app.substances.get_by_name('sample1')
         from clims.models.location import Location
         from clims.models.container import Container
         assert isinstance(fetched_sample1.location, Location)
@@ -334,8 +330,7 @@ class TestSampleSubmission(TestCase):
         self.app.substances.load_file(self.organization, "the_file.xlsx", fake_file_obj)
 
         # Assert
-        samples = SampleService()
-        pool = samples.get(name='XX-1111-Pool1')
+        pool = ioc.app.substances.get_by_name('XX-1111-Pool1')
         assert pool is not None
         assert pool.volume == 30
         assert pool.concentration == 0.63

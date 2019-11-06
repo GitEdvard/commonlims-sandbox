@@ -4,6 +4,7 @@ import os
 from six import BytesIO
 from clims.services.file_service.csv import Csv
 from clims.models.file import OrganizationFile
+from clims.models.file import MultiFormatFile
 from sentry.testutils import TestCase
 from sentry.models.file import File
 from sentry_plugins.snpseq.plugin.handlers.sample_submission import ExcelParser
@@ -33,12 +34,15 @@ class TestSampleSubmissionParsing(TestCase):
             lst.append('\t'.join([value for value in line]))
         return '\n'.join(lst)
 
+    @pytest.mark.now
     def test_parse_prep_from_excel__sample_list_equals_prep_from_csv(self):
         # Arrange
         org_file = self._create_organization_file(prep_sample_submission_path())
+        org_file = MultiFormatFile(org_file)
 
         # Act
-        with ExcelParser(org_file) as parser:
+        with MultiFormatFile(org_file) as wrapped_org_file:
+            parser = ExcelParser(wrapped_org_file)
             parsed_csv = parser.as_csv()
             contents_from_excel = self._to_contents(parsed_csv)
 
@@ -70,7 +74,6 @@ class TestSampleSubmissionParsing(TestCase):
         with ExcelParser(org_file) as parser:
             assert parser.project_code == 'XX-1111'
 
-    @pytest.mark.now
     def test_parser_prep_from_excel__without_calling_as_context_manager__exception(self):
         # Arrange
         org_file = self._create_organization_file(rml_sample_submission_path())

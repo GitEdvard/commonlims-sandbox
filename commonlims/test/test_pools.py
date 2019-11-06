@@ -3,6 +3,7 @@ from sentry.testutils import TestCase
 from sentry_plugins.snpseq.plugin.models import Pool
 from sentry_plugins.snpseq.plugin.models import RmlSample
 from clims.services.substance import SubstanceBase
+from clims.services.application import ioc
 
 
 class TestPools(TestCase):
@@ -171,8 +172,6 @@ class TestPools(TestCase):
         sample1 = RmlSample(name='sample1', organization=self.organization)
         sample1.save()
 
-        from sentry_plugins.snpseq.plugin.services.sample import SampleService
-        samples = SampleService(self.app)
-        fetched = samples.get(name='sample1')
+        fetched = ioc.app.substances.get_by_name('sample1')
 
         assert len(fetched.origins) == 1
