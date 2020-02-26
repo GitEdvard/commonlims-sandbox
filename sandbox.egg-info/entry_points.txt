@@ -1,0 +1,3 @@
+[console_scripts]
+add-data = commonlims.scripts.add_data:cli_main
+

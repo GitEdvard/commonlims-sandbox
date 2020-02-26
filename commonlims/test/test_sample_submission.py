@@ -66,7 +66,7 @@ class TestSampleSubmission(TestCase):
         handler = SampleSubmissionHandler(context=self.handler_context, app=self.app)
 
         # Act
-        handler.handle(file_obj=file)
+        handler.handle(multi_format_file=file)
 
         # Assert
         rows = [line for line in handler.csv]

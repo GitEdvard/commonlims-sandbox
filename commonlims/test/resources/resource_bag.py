@@ -43,6 +43,18 @@ def prep_sample_submission_path():
     return sample_submission_path
 
 
+def prep_sample_submission_failing_path():
+    here_dir = os.path.dirname(__file__)
+    sample_submission_path = os.path.join(here_dir, 'samplesubmission_prep_failing.xlsx')
+    return sample_submission_path
+
+
+def new_excel_file_path():
+    here_dir = os.path.dirname(__file__)
+    sample_submission_path = os.path.join(here_dir, 'new_file.xlsx')
+    return sample_submission_path
+
+
 def not_a_samplesubmission_path():
     here_dir = os.path.dirname(__file__)
     sample_submission_path = os.path.join(here_dir, 'not_a_samplesubmission.xlsx')

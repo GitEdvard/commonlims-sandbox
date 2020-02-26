@@ -7,7 +7,7 @@ from clims.models.file import OrganizationFile
 from clims.models.file import MultiFormatFile
 from sentry.testutils import TestCase
 from sentry.models.file import File
-from sentry_plugins.snpseq.plugin.handlers.sample_submission import ExcelParser
+from sentry_plugins.snpseq.plugin.handlers.sample_submission import SampleSubmissionFile
 from commonlims.test.resources.resource_bag import read_binary_file
 from commonlims.test.resources.resource_bag import prep_sample_submission_path
 from commonlims.test.resources.resource_bag import prep_sample_submission_path_csv
@@ -42,7 +42,7 @@ class TestSampleSubmissionParsing(TestCase):
 
         # Act
         with MultiFormatFile(org_file) as wrapped_org_file:
-            parser = ExcelParser(wrapped_org_file)
+            parser = SampleSubmissionFile(wrapped_org_file)
             parsed_csv = parser.as_csv()
             contents_from_excel = self._to_contents(parsed_csv)
 
@@ -56,7 +56,7 @@ class TestSampleSubmissionParsing(TestCase):
         org_file = self._create_organization_file(rml_sample_submission_path())
 
         # Act
-        with ExcelParser(org_file) as parser:
+        with SampleSubmissionFile(org_file) as parser:
             parsed_csv = parser.as_csv()
             contents_from_excel = self._to_contents(parsed_csv)
 
@@ -71,13 +71,13 @@ class TestSampleSubmissionParsing(TestCase):
 
         # Act
         # Assert
-        with ExcelParser(org_file) as parser:
+        with SampleSubmissionFile(org_file) as parser:
             assert parser.project_code == 'XX-1111'
 
     def test_parser_prep_from_excel__without_calling_as_context_manager__exception(self):
         # Arrange
         org_file = self._create_organization_file(rml_sample_submission_path())
-        parser = ExcelParser(org_file)
+        parser = SampleSubmissionFile(org_file)
 
         # Act
         # Assert
